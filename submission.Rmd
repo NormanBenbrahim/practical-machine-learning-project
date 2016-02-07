@@ -1,0 +1,133 @@
+---
+title: "Practical Machine Learning Course Project"
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+  word_document: default
+---
+
+Author: Norman Benbrahim
+
+This code has been run on a Mac OSX (8 GB RAM, 256 GB SSD) running on Mavericks with R version 3.2.3 (Sunday February 7th 2015)
+
+# The Problem Setting
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+# Getting the Data Ready
+
+First load the required packages
+```{r, message = FALSE}
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(corrplot)
+```
+
+Loading the data
+
+```{r, cache = TRUE}
+
+if (!file.exists("./data")) {
+    dir.create("./data")
+}
+
+if (!file.exists('./data/pml-training.csv')) {
+    download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 
+                  destfile = './data/pml-training.csv')
+}
+if (!file.exists('./data/pml-testing.csv')) {
+    download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 
+                  destfile = './data/pml-testing.csv')
+}
+
+training <- read.csv('./data/pml-training.csv', na.strings=c('NA','#DIV/0!',''))
+testing <- read.csv('./data/pml-testing.csv', na.strings=c('NA','#DIV/0!',''))
+```
+
+Now let's remove the rows and columns with NAs, as there is a lot of data to work with so we can afford it
+
+```{r}
+training <- training[, colSums(is.na(training)) == 0] 
+testing <- testing[, colSums(is.na(testing)) == 0] 
+```
+
+Now we're going to remove some of the data points that don't contribute much to accelerometer measurements 
+
+```{r}
+classe <- training$classe
+train_remove <- grepl("^X|timestamp|window", names(training))
+training <- training[, !train_remove]
+train_clean <- training[, sapply(training, is.numeric)]
+train_clean$classe <- classe
+test_remove <- grepl("^X|timestamp|window", names(testing))
+testing <- testing[, !test_remove]
+test_clean <- testing[, sapply(testing, is.numeric)]
+
+dim(test_clean)
+dim(train_clean)
+```
+
+Let's split our training data into a train and validate set. This ensures we can validate our model on our validation set and make any final tweaks based on this. We will use 80% training, 20% validation.
+
+```{r}
+set.seed(12345)
+inTrain <- createDataPartition(train_clean$classe, p=0.80, list=F)
+training_data <- train_clean[inTrain, ]
+validation_data <- train_clean[-inTrain, ]
+```
+
+# The Modeling
+
+Here we fit a predictive model using random forests (with 5-fold cross validation) to select the classe variable. Random forests is robust to covariates and picks out the important features. Additionally it verifies if any of your features are strongly correlated and only uses the ones it thinks will have the most impact. If you are running this on your local machine, be sure to cache your results when you are tweaking your own parameters!
+
+```{r, cache = TRUE, message = FALSE}
+control_rf <- trainControl(method='cv', 5)
+# takes ~ 5 mins to run
+model <- train(classe ~ ., data = training_data, method = 'rf', trControl=control_rf, ntree=250)
+```
+
+# The Validation
+
+Let's estimate the performance on the validation set now
+
+```{r, cache = TRUE}
+prediction <- predict(model, validation_data)
+confusionMatrix(validation_data$classe, prediction)
+```
+
+We get an accuracy of 99.1% and an estimated out of sample error of:
+
+```{r, cache = TRUE}
+1 - as.numeric(confusionMatrix(validation_data$classe, prediction)$overall[1])
+```
+
+on the validation set. Let's try it out on the test data
+
+# The Testing
+
+```{r, cache = TRUE}
+result <- predict(model, test_clean)
+result
+```
+
+# The Plots
+
+First let's visualize the decision tree
+
+```{r}
+treemod <- rpart(classe ~ ., data = training_data, method = "class")
+prp(treemod)
+```
+
+Now a correlation matrix
+
+```{r, message = FALSE}
+p <- cor(training_data[, -length(names(training_data))])
+corrplot(p, method="color")
+```
